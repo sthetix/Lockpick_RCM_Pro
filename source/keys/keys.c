@@ -815,7 +815,7 @@ void dump_keys() {
     gfx_con_setpos(0, 0);
 
     gfx_printf("%k╔══════════════════════════════════════╗\n", COLOR_GREY_M);
-    gfx_printf("║  %kLockpick_RCM Pro%k v%d.%d.%d         ║\n", COLOR_CYAN_L, COLOR_GREY_M, LP_VER_MJ, LP_VER_MN, LP_VER_BF);
+    gfx_printf("║  %kLockpick RCM Pro%k v%d.%d.%d         ║\n", COLOR_CYAN_L, COLOR_GREY_M, LP_VER_MJ, LP_VER_MN, LP_VER_BF);
     gfx_printf("╚══════════════════════════════════════╝%k\n\n", COLOR_SOFT_WHITE);
 
     _key_count = 0;
@@ -826,10 +826,20 @@ void dump_keys() {
 
     _derive_keys();
 
-    emummc_load_cfg();
-    // Ignore whether emummc is enabled.
-    h_cfg.emummc_force_disable = emu_cfg.sector == 0 && !emu_cfg.path;
-    emu_cfg.enabled = !h_cfg.emummc_force_disable;
+    // Only load and apply emummc config if not explicitly disabled by user choice
+    if (!h_cfg.emummc_force_disable) {
+        emummc_load_cfg();
+        // Auto-disable emummc if no valid config found
+        if (emu_cfg.sector == 0 && !emu_cfg.path) {
+            h_cfg.emummc_force_disable = true;
+            emu_cfg.enabled = false;
+        } else {
+            emu_cfg.enabled = true;
+        }
+    } else {
+        // User explicitly chose SysMMC via dump_sysnand(), respect that choice
+        emu_cfg.enabled = false;
+    }
 
     // Dump PRODINFO partition (both encrypted and decrypted)
     dump_prodinfo_after_keys();

@@ -101,7 +101,7 @@ void *tui_do_menu(menu_t *menu)
 	{
 		gfx_con_setcol(0xFFCCCCCC, 1, 0xFF1B1B1B);
 		gfx_con_setpos(menu->x, menu->y);
-		gfx_printf("[%kLockpick_RCM Pro%k v%d.%d.%d%k]\n\n",
+		gfx_printf("[%kLockpick RCM Pro%k v%d.%d.%d%k]\n\n",
 			COLOR_WHITE, COLOR_WHITE, LP_VER_MJ, LP_VER_MN, LP_VER_BF, COLOR_SOFT_WHITE);
 
 		// Skip caption or seperator lines selection.
