@@ -47,6 +47,7 @@ typedef struct _hekate_config
 	bool emummc_force_disable;
 	bool rcm_patched;
 	bool verbose_errors;
+	bool diagnostic_log;
 	u32  errors;
 } hekate_config;
 

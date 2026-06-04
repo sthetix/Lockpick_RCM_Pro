@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "diag.h"
 #include <display/di.h>
 #include <gfx_utils.h>
 #include "gfx/gfx.h"
@@ -529,9 +530,9 @@ out_wait:
 		{
 			if (vol_press_start == 0)
 				vol_press_start = get_tmr_ms();
-			else if (get_tmr_ms() - vol_press_start > 1000)
+			else if (get_tmr_ms() - vol_press_start > 2000)
 			{
-				// Button held for 1 second - take screenshot
+				// Button held for 2 seconds - take screenshot
 				int save_fb_to_bmp();
 				int res = save_fb_to_bmp();
 				if (!res)
@@ -809,9 +810,9 @@ out_wait:
 		{
 			if (vol_press_start == 0)
 				vol_press_start = get_tmr_ms();
-			else if (get_tmr_ms() - vol_press_start > 1000)
+			else if (get_tmr_ms() - vol_press_start > 2000)
 			{
-				// Button held for 1 second - take screenshot
+				// Button held for 2 seconds - take screenshot
 				int save_fb_to_bmp();
 				int res = save_fb_to_bmp();
 				if (!res)
@@ -888,13 +889,20 @@ void ipl_main()
 	set_default_configuration();
 
 	// Mount SD Card.
+	diag_log("boot: sd_mount start");
 	h_cfg.errors |= !sd_mount() ? ERR_SD_BOOT_EN : 0;
+	diag_log_u32("boot: sd_mount result", !(h_cfg.errors & ERR_SD_BOOT_EN));
+	diag_log("boot: config load start");
 	load_lockpick_configuration();
+	diag_log("boot: config load done");
 
 	// Train DRAM and switch to max frequency.
+	diag_log("boot: minerva init start");
 	if (minerva_init()) //!TODO: Add Tegra210B01 support to minerva.
 		h_cfg.errors |= ERR_LIBSYS_MTC;
+	diag_log_u32("boot: minerva result", !(h_cfg.errors & ERR_LIBSYS_MTC));
 
+	diag_log("boot: display init start");
 	display_init();
 
 	u32 *fb = display_init_framebuffer_pitch();
@@ -903,18 +911,25 @@ void ipl_main()
 	gfx_con_init();
 
 	display_backlight_pwm_init();
+	diag_screen_step(1, "display ready");
 
 	// Initialize HID input (Joy-Con support)
+	diag_screen_step(2, "hid init start");
 	hidInit();
+	diag_screen_step(3, "hid init done");
 
 	// Overclock BPMP.
+	diag_screen_step(4, "clock set start");
 	bpmp_clk_rate_set(h_cfg.t210b01 ? BPMP_CLK_DEFAULT_BOOST : BPMP_CLK_LOWER_BOOST);
+	diag_screen_step(5, "clock set done");
 
 	// Load emuMMC configuration from SD.
+	diag_screen_step(6, "emummc cfg start");
 	emummc_load_cfg();
 	// Ignore whether emummc is enabled.
 	h_cfg.emummc_force_disable = emu_cfg.sector == 0 && !emu_cfg.path;
 	emu_cfg.enabled = !h_cfg.emummc_force_disable;
+	diag_screen_step(7, "emummc cfg done");
 
 	// Grey out emummc option if not present.
 	if (h_cfg.emummc_force_disable)
@@ -940,6 +955,7 @@ void ipl_main()
 	}
 
 	minerva_change_freq(FREQ_800);
+	diag_screen_step(8, "entering menu");
 
 	while (true)
 		tui_do_menu(&menu_top);

@@ -49,6 +49,7 @@ void set_default_configuration()
 	h_cfg.emummc_force_disable = false;
 	h_cfg.t210b01 = hw_get_chip_id() == GP_HIDREV_MAJOR_T210B01;
 	h_cfg.verbose_errors = false;
+	h_cfg.diagnostic_log = false;
 }
 
 void load_lockpick_configuration()
@@ -66,6 +67,8 @@ void load_lockpick_configuration()
 		{
 			if (!strcmp("verbose_errors", kv->key))
 				h_cfg.verbose_errors = atoi(kv->val) != 0;
+			else if (!strcmp("diagnostic_log", kv->key))
+				h_cfg.diagnostic_log = atoi(kv->val) != 0;
 		}
 		break;
 	}

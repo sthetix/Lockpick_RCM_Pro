@@ -22,6 +22,7 @@
 #include "ssl_crypto.h"
 
 #include "../config.h"
+#include "../diag.h"
 #include <display/di.h>
 #include "../frontend/gui.h"
 #include <gfx_utils.h>
@@ -265,30 +266,43 @@ static bool _get_titlekeys_from_save(u32 buf_size, const u8 *save_mac_key, title
         titlekey_save_path[25] = '2';
     }
 
+    diag_log(is_personalized ? "titlekeys: personalized open save start" : "titlekeys: common open save start");
     if (f_open(&fp, titlekey_save_path, FA_READ | FA_OPEN_EXISTING)) {
+        diag_log(is_personalized ? "titlekeys: personalized save missing" : "titlekeys: common save missing");
         return false;
     }
+    diag_log(is_personalized ? "titlekeys: personalized open save done" : "titlekeys: common open save done");
 
     save_ctx_t *save_ctx = calloc(1, sizeof(save_ctx_t));
     save_init(save_ctx, &fp, save_mac_key, 0);
 
+    diag_log(is_personalized ? "titlekeys: personalized save_process start" : "titlekeys: common save_process start");
     if (!save_process(save_ctx)) {
+        diag_log(is_personalized ? "titlekeys: personalized save_process failed" : "titlekeys: common save_process failed");
         f_close(&fp);
         save_free_contexts(save_ctx);
         free(save_ctx);
         return false;
     }
+    diag_log(is_personalized ? "titlekeys: personalized save_process done" : "titlekeys: common save_process done");
+    diag_log_u32("titlekeys: header cmac validity", save_ctx->header_cmac_validity);
+    diag_log_u32("titlekeys: header hash validity", save_ctx->header_hash_validity);
 
+    diag_log(is_personalized ? "titlekeys: personalized open ticket_list start" : "titlekeys: common open ticket_list start");
     if (!save_open_file(save_ctx, &ticket_file, ticket_list_bin_path, OPEN_MODE_READ)) {
+        diag_log(is_personalized ? "titlekeys: personalized open ticket_list failed" : "titlekeys: common open ticket_list failed");
         f_close(&fp);
         save_free_contexts(save_ctx);
         free(save_ctx);
         return false;
     }
+    diag_log(is_personalized ? "titlekeys: personalized open ticket_list done" : "titlekeys: common open ticket_list done");
+    diag_log_u32("titlekeys: ticket_list size", (u32)ticket_file.size);
 
     // Read ticket list to get ticket count
     while (offset < ticket_file.size) {
         minerva_periodic_training();
+        diag_log_u32_pair("titlekeys: ticket_list offset", (u32)offset, (u32)ticket_file.size);
         if (!save_data_file_read(&ticket_file, &br, offset, titlekey_buffer->read_buffer, buf_size) ||
             titlekey_buffer->read_buffer[0] == 0 ||
             br != buf_size ||
@@ -298,13 +312,18 @@ static bool _get_titlekeys_from_save(u32 buf_size, const u8 *save_mac_key, title
         }
         offset += br;
     }
+    diag_log_u32("titlekeys: counted records", file_tkey_count);
 
+    diag_log(is_personalized ? "titlekeys: personalized open ticket_bin start" : "titlekeys: common open ticket_bin start");
     if (!save_open_file(save_ctx, &ticket_file, ticket_bin_path, OPEN_MODE_READ)) {
+        diag_log(is_personalized ? "titlekeys: personalized open ticket_bin failed" : "titlekeys: common open ticket_bin failed");
         f_close(&fp);
         save_free_contexts(save_ctx);
         free(save_ctx);
         return false;
     }
+    diag_log(is_personalized ? "titlekeys: personalized open ticket_bin done" : "titlekeys: common open ticket_bin done");
+    diag_log_u32("titlekeys: ticket_bin size", (u32)ticket_file.size);
 
     if (is_personalized)
         se_rsa_key_set(0, rsa_keypair->modulus, sizeof(rsa_keypair->modulus), rsa_keypair->private_exponent, sizeof(rsa_keypair->private_exponent));
@@ -312,6 +331,7 @@ static bool _get_titlekeys_from_save(u32 buf_size, const u8 *save_mac_key, title
     offset = 0;
     u32 remaining = file_tkey_count;
     while (offset < ticket_file.size && remaining) {
+        diag_log_u32_pair("titlekeys: ticket_bin offset", (u32)offset, (u32)ticket_file.size);
         if (!save_data_file_read(&ticket_file, &br, offset, titlekey_buffer->read_buffer, buf_size) || titlekey_buffer->read_buffer[0] == 0 || br != buf_size)
             break;
         offset += br;
@@ -323,6 +343,7 @@ static bool _get_titlekeys_from_save(u32 buf_size, const u8 *save_mac_key, title
     free(save_ctx);
 
     *elapsed_us = get_tmr_us() - step_time;
+    diag_log(is_personalized ? "titlekeys: personalized done" : "titlekeys: common done");
     return true;
 }
 
@@ -816,8 +837,11 @@ void derive_amiibo_keys() {
 }
 
 void dump_keys() {
+    diag_log("dump_keys: start");
     // Change CPU frequency BEFORE any graphics operations
+    diag_log("dump_keys: freq 1600 start");
     minerva_change_freq(FREQ_1600);
+    diag_log("dump_keys: freq 1600 done");
 
     display_backlight_brightness(h_cfg.backlight, 1000);
     gfx_clear_grey(0x1B);
@@ -848,7 +872,9 @@ void dump_keys() {
 
     start_time = get_tmr_us();
 
+    diag_log("dump_keys: derive keys start");
     _derive_keys();
+    diag_log("dump_keys: derive keys done");
 
     // Only load and apply emummc config if not explicitly disabled by user choice
     if (!h_cfg.emummc_force_disable) {
@@ -866,13 +892,16 @@ void dump_keys() {
     }
 
     // Dump PRODINFO partition (both encrypted and decrypted)
+    diag_log("dump_keys: prodinfo after keys start");
     dump_prodinfo_after_keys();
+    diag_log("dump_keys: prodinfo after keys done");
 
     if (emmc_storage.initialized) {
         sdmmc_storage_end(&emmc_storage);
     }
 
     minerva_change_freq(FREQ_800);
+    diag_log("dump_keys: waiting for button");
 
     // Wait for button press with hold detection for screenshot
     u32 vol_press_start = 0;
@@ -885,9 +914,9 @@ void dump_keys() {
         {
             if (vol_press_start == 0)
                 vol_press_start = get_tmr_ms();
-            else if (get_tmr_ms() - vol_press_start > 1000)
+            else if (get_tmr_ms() - vol_press_start > 2000)
             {
-                // Button held for 1 second - take screenshot
+                // Button held for 2 seconds - take screenshot
                 int save_fb_to_bmp();
                 int res = save_fb_to_bmp();
                 if (!res) {
@@ -977,28 +1006,38 @@ bool get_emmc_id_external(char *emmc_id_out) {
 }
 
 void dump_prodinfo_after_keys() {
+    diag_log("prodinfo: start");
     gfx_printf("\n" GFX_LANDSCAPE_MARGIN_STR "%kDumping PRODINFO partition...\n", COLOR_CYAN_L);
 
     // Mount SD card
+    diag_log("prodinfo: sd mount start");
     if (!sd_mount()) {
+        diag_log("prodinfo: sd mount failed");
         gfx_printf(GFX_LANDSCAPE_MARGIN_STR "SD mount failed!\n");
         return;
     }
+    diag_log("prodinfo: sd mount done");
 
     // Ensure eMMC is already initialized from key derivation
+    diag_log("prodinfo: emmc init check start");
     if (!emmc_storage.initialized && emummc_storage_init_mmc()) {
+        diag_log("prodinfo: emmc init failed");
         gfx_printf(GFX_LANDSCAPE_MARGIN_STR "eMMC init failed!\n");
         sd_end();
         return;
     }
+    diag_log("prodinfo: emmc init check done");
 
     // Get eMMC ID for folder structure
     char emmc_id[9] = {0};  // 8 hex chars + null terminator
+    diag_log("prodinfo: emmc id start");
     if (!get_emmc_id(emmc_id)) {
+        diag_log("prodinfo: emmc id failed");
         gfx_printf(GFX_LANDSCAPE_MARGIN_STR "Failed to get eMMC ID!\n");
         sd_end();
         return;
     }
+    diag_log("prodinfo: emmc id done");
 
     gfx_printf(GFX_LANDSCAPE_MARGIN_STR "%kDevice ID: %s\n", COLOR_CYAN_L, emmc_id);
 
@@ -1016,8 +1055,10 @@ void dump_prodinfo_after_keys() {
     f_mkdir(base_path);
     f_mkdir(partitions_path);
     f_mkdir(dumps_path);
+    diag_log("prodinfo: directories done");
 
     // Check for old backups and migrate silently
+    diag_log("prodinfo: old backup migration check start");
     FIL fp_test;
     bool has_old_dec = (f_open(&fp_test, "sd:/switch/prodinfo.dec", FA_READ) == FR_OK);
     if (has_old_dec) f_close(&fp_test);
@@ -1086,30 +1127,40 @@ void dump_prodinfo_after_keys() {
             }
         }
     }
+    diag_log("prodinfo: old backup migration check done");
 
     // Set to GPP partition to parse GPT
+    diag_log("prodinfo: set GPP start");
     if (!emummc_storage_set_mmc_partition(EMMC_GPP)) {
+        diag_log("prodinfo: set GPP failed");
         gfx_printf(GFX_LANDSCAPE_MARGIN_STR "GPP partition failed!\n");
         sd_end();
         return;
     }
+    diag_log("prodinfo: set GPP done");
 
     // Parse GPT to find PRODINFO partition
+    diag_log("prodinfo: gpt parse start");
     LIST_INIT(gpt);
     nx_emmc_gpt_parse(&gpt, &emmc_storage);
     emmc_part_t *prodinfo_part = nx_emmc_part_find(&gpt, "PRODINFO");
     if (!prodinfo_part) {
+        diag_log("prodinfo: partition not found");
         gfx_printf(GFX_LANDSCAPE_MARGIN_STR "PRODINFO not found!\n");
         nx_emmc_gpt_free(&gpt);
         sd_end();
         return;
     }
+    diag_log("prodinfo: partition found");
 
     // Initialize BIS encryption for PRODINFO
+    diag_log("prodinfo: bis init start");
     nx_emmc_bis_init(prodinfo_part);
+    diag_log("prodinfo: bis init done");
 
     u32 partition_sectors = prodinfo_part->lba_end - prodinfo_part->lba_start + 1;
     u32 partition_size = partition_sectors * NX_EMMC_BLOCKSIZE;
+    diag_log_u32("prodinfo: sectors", partition_sectors);
 
     gfx_printf(GFX_LANDSCAPE_MARGIN_STR "%kPRODINFO size: %d KB (%d sectors)\n", COLOR_WHITE, partition_size / 1024, partition_sectors);
 
@@ -1117,11 +1168,13 @@ void dump_prodinfo_after_keys() {
     const u32 buf_size = 0x40000;
     u8 *buffer = (u8 *)malloc(buf_size);
     if (!buffer) {
+        diag_log("prodinfo: buffer alloc failed");
         gfx_printf(GFX_LANDSCAPE_MARGIN_STR "Buffer alloc failed!\n");
         nx_emmc_gpt_free(&gpt);
         sd_end();
         return;
     }
+    diag_log("prodinfo: buffer alloc done");
 
     // Dump decrypted PRODINFO to dumps folder
     gfx_printf(GFX_LANDSCAPE_MARGIN_STR "%kDumping PRODINFO...\n", COLOR_WHITE);
@@ -1129,21 +1182,26 @@ void dump_prodinfo_after_keys() {
     s_printf(dec_path, "%s/prodinfo.dec", dumps_path);
 
     FIL fp_dec;
+    diag_log("prodinfo: dec open start");
     if (f_open(&fp_dec, dec_path, FA_CREATE_ALWAYS | FA_WRITE)) {
+        diag_log("prodinfo: dec open failed");
         gfx_printf(GFX_LANDSCAPE_MARGIN_STR "Failed to create dec!\n");
         free(buffer);
         nx_emmc_gpt_free(&gpt);
         sd_end();
         return;
     }
+    diag_log("prodinfo: dec open done");
 
     u32 num_sectors_per_read = buf_size / NX_EMMC_BLOCKSIZE;
     u32 sectors_read = 0;
 
     while (sectors_read < partition_sectors) {
         u32 sectors_to_read = MIN(num_sectors_per_read, partition_sectors - sectors_read);
+        diag_log_u32_pair("prodinfo: dec sector", sectors_read, partition_sectors);
 
         if (nx_emmc_bis_read(sectors_read, sectors_to_read, buffer)) {
+            diag_log_u32("prodinfo: dec read error sector", sectors_read);
             gfx_printf(GFX_LANDSCAPE_MARGIN_STR "Read error at sector %d!\n", sectors_read);
             break;
         }
@@ -1151,6 +1209,7 @@ void dump_prodinfo_after_keys() {
         u32 bytes_to_write = sectors_to_read * NX_EMMC_BLOCKSIZE;
         UINT bytes_written;
         if (f_write(&fp_dec, buffer, bytes_to_write, &bytes_written) || bytes_written != bytes_to_write) {
+            diag_log_u32("prodinfo: dec write error sector", sectors_read);
             gfx_printf(GFX_LANDSCAPE_MARGIN_STR "Write error!\n");
             break;
         }
@@ -1160,6 +1219,7 @@ void dump_prodinfo_after_keys() {
 
     f_close(&fp_dec);
     nx_emmc_bis_finalize();
+    diag_log_u32_pair("prodinfo: dec done sectors", sectors_read, partition_sectors);
 
     if (sectors_read == partition_sectors) {
         gfx_printf(GFX_LANDSCAPE_MARGIN_STR "%kDone!\n", COLOR_GREEN);
@@ -1172,22 +1232,27 @@ void dump_prodinfo_after_keys() {
     s_printf(hekate_path, "%s/PRODINFO", partitions_path);
 
     FIL fp_enc;
+    diag_log("prodinfo: enc open start");
     if (f_open(&fp_enc, enc_path, FA_CREATE_ALWAYS | FA_WRITE)) {
+        diag_log("prodinfo: enc open failed");
         gfx_printf(GFX_LANDSCAPE_MARGIN_STR "Failed to create enc!\n");
         free(buffer);
         nx_emmc_gpt_free(&gpt);
         sd_end();
         return;
     }
+    diag_log("prodinfo: enc open done");
 
     sectors_read = 0;
     u32 lba_start = prodinfo_part->lba_start;
 
     while (sectors_read < partition_sectors) {
         u32 sectors_to_read = MIN(num_sectors_per_read, partition_sectors - sectors_read);
+        diag_log_u32_pair("prodinfo: enc sector", sectors_read, partition_sectors);
 
         // Read raw encrypted sectors directly from eMMC
         if (!sdmmc_storage_read(&emmc_storage, lba_start + sectors_read, sectors_to_read, buffer)) {
+            diag_log_u32("prodinfo: enc read error sector", sectors_read);
             gfx_printf(GFX_LANDSCAPE_MARGIN_STR "Read error at sector %d!\n", sectors_read);
             break;
         }
@@ -1195,6 +1260,7 @@ void dump_prodinfo_after_keys() {
         u32 bytes_to_write = sectors_to_read * NX_EMMC_BLOCKSIZE;
         UINT bytes_written;
         if (f_write(&fp_enc, buffer, bytes_to_write, &bytes_written) || bytes_written != bytes_to_write) {
+            diag_log_u32("prodinfo: enc write error sector", sectors_read);
             gfx_printf(GFX_LANDSCAPE_MARGIN_STR "Write error!\n");
             break;
         }
@@ -1203,9 +1269,11 @@ void dump_prodinfo_after_keys() {
     }
 
     f_close(&fp_enc);
+    diag_log_u32_pair("prodinfo: enc done sectors", sectors_read, partition_sectors);
 
     if (sectors_read == partition_sectors) {
         // Copy encrypted version to partitions/PRODINFO (Hekate-compatible location)
+        diag_log("prodinfo: hekate copy start");
         FIL fp_src, fp_dst;
         if (f_open(&fp_src, enc_path, FA_READ) == FR_OK) {
             if (f_open(&fp_dst, hekate_path, FA_CREATE_ALWAYS | FA_WRITE) == FR_OK) {
@@ -1229,6 +1297,7 @@ void dump_prodinfo_after_keys() {
             }
             f_close(&fp_src);
         }
+        diag_log("prodinfo: hekate copy done");
     }
 
     // Show final backup location
@@ -1238,4 +1307,5 @@ void dump_prodinfo_after_keys() {
     free(buffer);
     nx_emmc_gpt_free(&gpt);
     sd_end();
+    diag_log("prodinfo: done");
 }

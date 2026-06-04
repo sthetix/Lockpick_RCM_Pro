@@ -35,6 +35,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include "save.h"
 
 #include "../../../source/config.h"
+#include "../../../source/diag.h"
 #include <gfx_utils.h>
 #include <mem/heap.h>
 #include <rtc/max77620-rtc.h>
@@ -125,35 +126,54 @@ void save_init(save_ctx_t *ctx, FIL *file, const uint8_t *save_mac_key, uint32_t
 }
 
 bool save_process(save_ctx_t *ctx) {
+    diag_log("save_process: start");
     substorage_init(&ctx->base_storage, &file_storage_vt, ctx->file, 0, f_size(ctx->file));
+    diag_log_u32("save_process: file size", (u32)f_size(ctx->file));
     /* Try to parse Header A. */
+    diag_log("save_process: header A read start");
     if (substorage_read(&ctx->base_storage, &ctx->header, 0, sizeof(ctx->header)) != sizeof(ctx->header)) {
         EPRINTF("Failed to read save header A!\n");
+        diag_log("save_process: header A read failed");
         return false;
     }
+    diag_log("save_process: header A read done");
 
     if (!save_process_header(ctx) || (ctx->header_cmac_validity == VALIDITY_INVALID)) {
+        diag_log("save_process: header A rejected");
+        diag_log_u32("save_process: header A cmac", ctx->header_cmac_validity);
+        diag_log_u32("save_process: header A hash", ctx->header_hash_validity);
         /* Try to parse Header B. */
+        diag_log("save_process: header B read start");
         if (substorage_read(&ctx->base_storage, &ctx->header, sizeof(ctx->header), sizeof(ctx->header)) != sizeof(ctx->header)) {
             EPRINTF("Failed to read save header B!\n");
+            diag_log("save_process: header B read failed");
             return false;
         }
+        diag_log("save_process: header B read done");
 
         if (!save_process_header(ctx) || (ctx->header_cmac_validity == VALIDITY_INVALID)) {
             EPRINTF("Error: Save header is invalid!");
+            diag_log("save_process: header B rejected");
+            diag_log_u32("save_process: header B cmac", ctx->header_cmac_validity);
+            diag_log_u32("save_process: header B hash", ctx->header_hash_validity);
             return false;
         }
     }
+    diag_log("save_process: header accepted");
+    diag_log_u32("save_process: header cmac", ctx->header_cmac_validity);
+    diag_log_u32("save_process: header hash", ctx->header_hash_validity);
 
     if (h_cfg.verbose_errors && ctx->header_hash_validity == VALIDITY_INVALID)
         EPRINTF("Save header hash mismatch; accepting valid CMAC header.");
 
     if (ctx->header.layout.version > VERSION_DISF_5) {
         EPRINTF("Unsupported save version.\nLibrary must be updated.");
+        diag_log_u32("save_process: unsupported version", ctx->header.layout.version);
         return false;
     }
 
     /* Initialize remap storages. */
+    diag_log("save_process: remap init start");
     ctx->data_remap_storage.header = &ctx->header.main_remap_header;
     ctx->meta_remap_storage.header = &ctx->header.meta_remap_header;
 
@@ -165,6 +185,7 @@ bool save_process(save_ctx_t *ctx) {
     uint8_t *remap_buffer = malloc(MAX(data_remap_entry_size, meta_remap_entry_size));
     if (substorage_read(&ctx->base_storage, remap_buffer, ctx->header.layout.file_map_entry_offset, data_remap_entry_size) != data_remap_entry_size) {
         EPRINTF("Failed to read data remap table!");
+        diag_log("save_process: data remap read failed");
         free(remap_buffer);
         return false;
     }
@@ -177,12 +198,14 @@ bool save_process(save_ctx_t *ctx) {
     /* Initialize data remap storage. */
     ctx->data_remap_storage.segments = save_remap_storage_init_segments(&ctx->data_remap_storage);
     if (!ctx->data_remap_storage.segments) {
+        diag_log("save_process: data remap segments failed");
         free(remap_buffer);
         return false;
     }
 
     /* Initialize hierarchical duplex storage. */
     if (!save_hierarchical_duplex_storage_init(&ctx->duplex_storage, &ctx->data_remap_storage, &ctx->header)) {
+        diag_log("save_process: duplex init failed");
         free(remap_buffer);
         return false;
     }
@@ -192,6 +215,7 @@ bool save_process(save_ctx_t *ctx) {
     ctx->meta_remap_storage.map_entries = calloc(1, sizeof(remap_entry_ctx_t) * ctx->meta_remap_storage.header->map_entry_count);
     if (substorage_read(&ctx->base_storage, remap_buffer, ctx->header.layout.meta_map_entry_offset, meta_remap_entry_size) != meta_remap_entry_size) {
         EPRINTF("Failed to read meta remap table!");
+        diag_log("save_process: meta remap read failed");
         free(remap_buffer);
         return false;
     }
@@ -203,16 +227,20 @@ bool save_process(save_ctx_t *ctx) {
     free(remap_buffer);
 
     ctx->meta_remap_storage.segments = save_remap_storage_init_segments(&ctx->meta_remap_storage);
-    if (!ctx->meta_remap_storage.segments)
+    if (!ctx->meta_remap_storage.segments) {
+        diag_log("save_process: meta remap segments failed");
         return false;
+    }
 
     /* Initialize journal map. */
     journal_map_params_t journal_map_info;
     journal_map_info.map_storage = malloc(ctx->header.layout.journal_map_table_size);
     if (save_remap_storage_read(&ctx->meta_remap_storage, journal_map_info.map_storage, ctx->header.layout.journal_map_table_offset, ctx->header.layout.journal_map_table_size) != ctx->header.layout.journal_map_table_size) {
         EPRINTF("Failed to read journal map!");
+        diag_log("save_process: journal map read failed");
         return false;
     }
+    diag_log("save_process: remap init done");
 
     /* Initialize journal storage. */
     substorage journal_data;
@@ -234,10 +262,13 @@ bool save_process(save_ctx_t *ctx) {
     }
 
     if (ctx->action & ACTION_VERIFY) {
+        diag_log("save_process: verify start");
         save_filesystem_verify(ctx);
+        diag_log("save_process: verify done");
     }
 
     /* Initialize core save filesystem. */
+    diag_log("save_process: filesystem init start");
     return save_data_file_system_core_init(&ctx->save_filesystem_core, &ctx->core_data_ivfc_storage.base_storage, ctx->fat_storage, &ctx->header.save_header);
 }
 
