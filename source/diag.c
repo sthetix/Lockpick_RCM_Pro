@@ -4,6 +4,9 @@
 
 #include "config.h"
 #include "diag.h"
+
+#ifdef LP_DIAG_LOG
+
 #include "gfx/gfx.h"
 #include <libs/fatfs/ff.h>
 #include <storage/nx_sd.h>
@@ -69,3 +72,5 @@ void diag_screen_step(u32 step, const char *msg)
 	s_printf(log_msg, "DBG %d: %s", step, msg);
 	diag_log(log_msg);
 }
+
+#endif
