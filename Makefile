@@ -67,7 +67,7 @@ TOOLS := $(TOOLSLZ) $(TOOLSB2C)
 
 .PHONY: all clean zip $(LDRDIR) $(TOOLS)
 
-all: $(OUTPUTDIR)/$(TARGET).bin zip
+all: $(LDRDIR) zip
 	@echo "--------------------------------------"
 	@if [ -f $(OUTPUTDIR)/$(TARGET)_unc.bin ]; then \
 		UNC_SIZE=$$(wc -c < $(OUTPUTDIR)/$(TARGET)_unc.bin); \
@@ -81,7 +81,7 @@ all: $(OUTPUTDIR)/$(TARGET).bin zip
 	if [ $$BIN_SIZE -gt 131072 ]; then echo "\e[1;33mPayload size exceeds limit!\e[0m"; fi
 	@echo "--------------------------------------"
 
-zip: $(OUTPUTDIR)/$(TARGET).bin
+zip: $(LDRDIR)
 	@mkdir -p $(OUTPUTDIR)/zip_temp/bootloader/payloads
 	@mkdir -p $(OUTPUTDIR)/zip_temp/config/lockpick_rcm_pro
 	@cp $(OUTPUTDIR)/$(TARGET).bin $(OUTPUTDIR)/zip_temp/bootloader/payloads/$(TARGET).bin
