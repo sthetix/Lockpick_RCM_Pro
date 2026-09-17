@@ -306,24 +306,24 @@ void *tui_do_menu(menu_t *menu)
 			case MENT_HANDLER:
 				// Wait for button release BEFORE calling handler so that any
 				// menus opened inside the handler don't inherit this press.
-				while (hidRead()->buttons) msleep(10);
+				while (hidRead()->buttons & (JoyA | BtnPow)) msleep(10);
 				btn_last = 0;
 				ent->handler(ent->data);
 				need_full_redraw = 1; // Full redraw needed after handler clears screen
 				// Also wait after handler returns (it may have left buttons held).
-				while (hidRead()->buttons) msleep(10);
+				while (hidRead()->buttons & (JoyA | BtnPow)) msleep(10);
 				btn_last = 0;
 				break;
 			case MENT_MENU:
 				{
 					// Wait for button release before entering sub-menu for same reason.
-					while (hidRead()->buttons) msleep(10);
+					while (hidRead()->buttons & (JoyA | BtnPow)) msleep(10);
 					btn_last = 0;
 					void *result = tui_do_menu(ent->menu);
 					// Clear full screen after returning from sub-menu
 					gfx_clear_grey(0x1B);
 					// Wait for all buttons to be released to prevent double-trigger
-					while (hidRead()->buttons) msleep(10);
+					while (hidRead()->buttons & (JoyA | BtnPow)) msleep(10);
 					btn_last = 0;
 					return result;
 				}
@@ -333,14 +333,14 @@ void *tui_do_menu(menu_t *menu)
 				return NULL;
 			case MENT_HDLR_RE:
 				// Wait for button release before calling handler (same as MENT_HANDLER).
-				while (hidRead()->buttons) msleep(10);
+				while (hidRead()->buttons & (JoyA | BtnPow)) msleep(10);
 				btn_last = 0;
 				ent->handler(ent);
 				need_full_redraw = 1; // Full redraw needed after handler clears screen
 				if (!ent->data)
 					return NULL;
 				// Wait for all buttons to be released to prevent double-trigger
-				while (hidRead()->buttons) msleep(10);
+				while (hidRead()->buttons & (JoyA | BtnPow)) msleep(10);
 				btn_last = 0;
 				break;
 			default:

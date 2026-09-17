@@ -196,6 +196,11 @@ static void _derive_keyblob_keys(key_storage_t *keys) {
 static void _derive_master_keys(key_storage_t *prod_keys, key_storage_t *dev_keys, bool is_dev) {
     key_storage_t *keys = is_dev ? dev_keys : prod_keys;
 
+    diag_log("keys: master derivation start");
+    diag_log_u32("keys: mariko", h_cfg.t210b01);
+    diag_log_u32("keys: development unit", is_dev);
+    diag_log_u32("keys: fuse keygen revision", fuse_read_odm_keygen_rev());
+
     // secure_boot_key: pure fuse register read, identical on Erista and Mariko —
     // matches AesKeySlot_SecureBoot being available before either DeriveKeysErista()
     // or DeriveKeysMariko() runs in Atmosphere's own fusee_key_derivation.cpp.
@@ -214,14 +219,18 @@ static void _derive_master_keys(key_storage_t *prod_keys, key_storage_t *dev_key
         // DeviceMasterKeySourceKekSource instead of going through AesKeySlot_Device.
         minerva_periodic_training();
         se_aes_crypt_block_ecb(KS_SECURE_BOOT, DECRYPT, keys->device_key_4x, device_master_key_source_kek_source);
+        diag_log_u32("keys: mariko device_key_4x present", key_exists(keys->device_key_4x));
     } else {
         // Erista: run TSEC keygen firmware for tsec_key (console-unique; Mariko never
         // runs this at all, confirmed by Atmosphere's DeriveAllKeys() only calling
         // tsec::RunTsecFirmware() when soc_type == SocType_Erista).
+        diag_log("keys: ams keygen start");
         if (run_ams_keygen()) {
+            diag_log("keys: ams keygen failed");
             EPRINTF("Failed to run keygen.");
             return;
         }
+        diag_log("keys: ams keygen done");
 
         u8 *aes_keys = (u8 *)calloc(1, SZ_4K);
         se_get_aes_keys(aes_keys + SZ_2K, aes_keys, SE_KEY_128_SIZE);
@@ -230,6 +239,7 @@ static void _derive_master_keys(key_storage_t *prod_keys, key_storage_t *dev_key
         free(aes_keys);
 
         _derive_keyblob_keys(keys);
+        diag_log("keys: keyblob derivation done");
     }
 
     // tsec_root_key: pure software (hovi_kek), independent of Erista/Mariko — master
@@ -244,6 +254,11 @@ static void _derive_master_keys(key_storage_t *prod_keys, key_storage_t *dev_key
 
     _derive_master_keys_from_vectors_and_sources(prod_keys, false);
     _derive_master_keys_from_vectors_and_sources(dev_keys, true);
+    diag_log_u32("keys: prod master_kek_16 present", key_exists(prod_keys->master_kek[KB_FIRMWARE_VERSION_2300]));
+    diag_log_u32("keys: prod master_key_16 present", key_exists(prod_keys->master_key[KB_FIRMWARE_VERSION_2300]));
+    diag_log_u32("keys: dev master_kek_16 present", key_exists(dev_keys->master_kek[KB_FIRMWARE_VERSION_2300]));
+    diag_log_u32("keys: dev master_key_16 present", key_exists(dev_keys->master_key[KB_FIRMWARE_VERSION_2300]));
+    diag_log("keys: master derivation done");
 }
 
 static void _derive_bis_keys(key_storage_t *keys) {
@@ -800,25 +815,34 @@ static void _derive_keys() {
 
     minerva_periodic_training();
 
+    diag_screen_step(20, "key derivation start");
+
     if (!check_keyslot_access()) {
+        diag_screen_step(21, "crypto keyslot access failed");
         EPRINTF("Unable to set crypto keyslots!\nTry launching payload differently\n or flash Spacecraft-NX if using a modchip.");
         return;
     }
+    diag_screen_step(21, "crypto keyslot access OK");
 
     // MMC init
     step_time = get_tmr_us();
     if (emummc_storage_init_mmc()) {
+        diag_screen_step(22, "MMC init failed");
         EPRINTF("Unable to init MMC.");
         return;
     }
+    diag_screen_step(22, "MMC init OK");
     gfx_printf(GFX_LANDSCAPE_MARGIN_STR "%kMMC init...             %kdone in %d us\n", COLOR_WHITE, 0xFFCCCCCC, (get_tmr_us() - step_time));
 
     minerva_periodic_training();
 
     if (emmc_storage.initialized && !emummc_storage_set_mmc_partition(EMMC_BOOT0)) {
+        diag_screen_step(23, "BOOT0 select failed");
         EPRINTF("Unable to set partition.");
         emummc_storage_end();
+        return;
     }
+    diag_screen_step(23, "BOOT0 select OK");
 
     bool is_dev = fuse_read_hw_state() == FUSE_NX_HW_STATE_DEV;
 
@@ -828,11 +852,17 @@ static void _derive_keys() {
     // Master keys
     step_time = get_tmr_us();
     _derive_master_keys(&prod_keys, &dev_keys, is_dev);
+    diag_log_u32("keys: selected master_key_16 present", key_exists(keys->master_key[KB_FIRMWARE_VERSION_2300]));
+    diag_screen_step(24, key_exists(keys->master_key[KB_FIRMWARE_VERSION_2300]) ? "FW23 master key OK" : "FW23 master key MISSING");
     gfx_printf(GFX_LANDSCAPE_MARGIN_STR "%kMaster keys...          %kdone in %d us\n", COLOR_WHITE, 0xFFCCCCCC, (get_tmr_us() - step_time));
 
     // BIS keys
     step_time = get_tmr_us();
     _derive_bis_keys(keys);
+    diag_log_u32("keys: BIS key 0 present", key_exists(keys->bis_key[0]));
+    diag_log_u32("keys: BIS key 1 present", key_exists(keys->bis_key[1]));
+    diag_log_u32("keys: BIS key 2 present", key_exists(keys->bis_key[2]));
+    diag_screen_step(25, key_exists(keys->bis_key[2]) ? "BIS keys OK" : "BIS keys MISSING");
     gfx_printf(GFX_LANDSCAPE_MARGIN_STR "%kBIS keys...             %kdone in %d us\n", COLOR_WHITE, 0xFFCCCCCC, (get_tmr_us() - step_time));
 
     _derive_misc_keys(keys);
@@ -842,6 +872,9 @@ static void _derive_keys() {
     new_gen_keys_t new_keys = {0}, new_keys_dev = {0};
     int new_gen_mkr = 0, gap_start = 0, gap_end = -1;
     int key_gen_result = extract_new_gen_keys(keys, &new_keys, &new_keys_dev, &new_gen_mkr, &gap_start, &gap_end);
+    diag_log_u32("keys: new generation result", key_gen_result);
+    diag_log_u32("keys: new generation master key", new_gen_mkr);
+    diag_log_u32_pair("keys: missing generation range", gap_start, gap_end);
     if (key_gen_result > 0) {
         gfx_printf(GFX_LANDSCAPE_MARGIN_STR "%kNew keys derived for master_key_%02x\n", COLOR_YELLOW, new_gen_mkr);
         if (gap_start <= gap_end)
@@ -1045,8 +1078,9 @@ void dump_keys() {
         else
         {
             vol_press_start = 0;
-            // Any other button pressed - return immediately
-            if (btn)
+            // Return only for an actual user button. Ignore persistent Joy-Con
+            // status bits so a connected controller cannot close this screen.
+            if (btn & (WAITBUTTONS | BtnPow | BtnVolP | BtnVolM))
                 break;
         }
 
